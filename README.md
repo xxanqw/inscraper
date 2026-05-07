@@ -8,6 +8,7 @@ Instagram media metadata extractor with VPN rotation and media proxying. Built w
 - **Playwright Fallback** — DOM-based extraction when GraphQL is blocked or rate-limited.
 - **VPN Rotation** — Automatically rotates NordVPN IPs via Gluetun on 403/429 responses.
 - **Media Proxy** — Optional proxy endpoint to stream media through the VPN tunnel instead of exposing your real IP to Instagram's CDN.
+- **On-Disk Cache** — Persistent SQLite cache for scraped metadata. TTL and 10GB size limit with automatic eviction.
 - **Zero-Trust Networking** — Scraper container runs inside Gluetun's network namespace; all outbound traffic is tunneled.
 
 ## API
@@ -94,6 +95,8 @@ services:
     image: ghcr.io/xxanqw/inscraper:main
     container_name: scraper
     network_mode: "service:gluetun"
+    volumes:
+      - ./cache:/app/cache
     depends_on:
       gluetun:
         condition: service_started
@@ -134,6 +137,7 @@ docker run -d \
 docker run -d \
   --name scraper \
   --network container:gluetun \
+  -v "$(pwd)/cache:/app/cache" \
   -e GLUETUN_CONTROL_URL=http://localhost:8000 \
   -e GLUETUN_API_KEY="${GLUETUN_API_KEY:-secret-key}" \
   --restart always \
@@ -150,11 +154,14 @@ docker build -t instcaper .
 
 ## Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `NORDVPN_USER` | NordVPN service username |
-| `NORDVPN_PASSWORD` | NordVPN service password |
-| `GLUETUN_API_KEY` | API key for Gluetun control server (default: `secret-key`) |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `NORDVPN_USER` | NordVPN service username | — |
+| `NORDVPN_PASSWORD` | NordVPN service password | — |
+| `GLUETUN_API_KEY` | API key for Gluetun control server | `secret-key` |
+| `CACHE_PATH` | SQLite cache file path | `./cache/scraper.db` |
+| `CACHE_MAX_SIZE_GB` | Max cache size before eviction | `10.0` |
+| `CACHE_TTL_SECONDS` | Cache entry lifetime | `3600` |
 
 ## Testing
 

@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse
+import os
 import re
 import logging
 import urllib.parse
@@ -7,6 +8,7 @@ import httpx
 from .models import ScrapeRequest, ScrapeResponse, ExtractedMedia
 from .scraper import InstagramGraphScraper, RateLimitError
 from .playwright_scraper import InstagramPlaywrightScraper
+from .cache import DiskCache
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -14,6 +16,11 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="InstaCaper API", version="1.0.0")
 scraper = InstagramGraphScraper()
 pw_scraper = InstagramPlaywrightScraper()
+disk_cache = DiskCache(
+    db_path=os.getenv("CACHE_PATH", "./cache/scraper.db"),
+    max_size_gb=float(os.getenv("CACHE_MAX_SIZE_GB", "10.0")),
+    ttl_seconds=int(os.getenv("CACHE_TTL_SECONDS", "3600")),
+)
 
 
 def extract_shortcode(url: str) -> str:
@@ -54,10 +61,20 @@ def _proxify_response(response: ScrapeResponse, base_url: str) -> ScrapeResponse
 @app.post("/scrape", response_model=ScrapeResponse)
 async def process_scrape_request(request: ScrapeRequest, fastapi_request: Request):
     shortcode = extract_shortcode(str(request.url))
+
+    cached = await disk_cache.get(shortcode)
+    if cached:
+        logger.info(f"Cache hit for shortcode: {shortcode}")
+        result = ScrapeResponse(**cached)
+        if request.proxy:
+            result = _proxify_response(result, str(fastapi_request.base_url))
+        return result
+
     logger.info(f"Processing scrape request for shortcode: {shortcode}")
     try:
         raw_graph_data = await scraper.extract_media(shortcode)
         parsed_data = scraper.parse_response(raw_graph_data)
+        await disk_cache.set(shortcode, parsed_data.model_dump())
         if request.proxy:
             parsed_data = _proxify_response(parsed_data, str(fastapi_request.base_url))
         return parsed_data
@@ -72,10 +89,21 @@ async def process_scrape_request(request: ScrapeRequest, fastapi_request: Reques
 @app.post("/scrape/playwright", response_model=ScrapeResponse)
 async def process_playwright_scrape_request(request: ScrapeRequest, fastapi_request: Request):
     """Fallback scraper using Playwright for DOM-based extraction."""
+    shortcode = extract_shortcode(str(request.url))
+
+    cached = await disk_cache.get(shortcode)
+    if cached:
+        logger.info(f"Cache hit for shortcode: {shortcode}")
+        result = ScrapeResponse(**cached)
+        if request.proxy:
+            result = _proxify_response(result, str(fastapi_request.base_url))
+        return result
+
     logger.info(f"Processing Playwright scrape request for: {request.url}")
     result = await pw_scraper.scrape(str(request.url))
     if not result:
         raise HTTPException(status_code=500, detail="Playwright scraper failed to extract data.")
+    await disk_cache.set(shortcode, result.model_dump())
     if request.proxy:
         result = _proxify_response(result, str(fastapi_request.base_url))
     return result

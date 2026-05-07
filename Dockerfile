@@ -40,6 +40,12 @@ RUN uv run playwright install chromium
 # Copy application code
 COPY app ./app
 
+# Cache directory
+RUN mkdir -p /app/cache
+ENV CACHE_PATH=/app/cache/scraper.db
+ENV CACHE_MAX_SIZE_GB=10.0
+ENV CACHE_TTL_SECONDS=3600
+
 # Expose the application port
 EXPOSE 8080
 
