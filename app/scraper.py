@@ -86,24 +86,24 @@ class InstagramGraphScraper:
                 data=encoded_payload
             )
 
-            if response.status_code in [403, 429]:
+            if response.status_code in [401, 403, 429]:
                 raise RateLimitError(f"HTTP {response.status_code}: IP restriction detected.")
 
             response.raise_for_status()
             data = response.json()
 
-            try:
-                return data['data']['xdt_shortcode_media']
-            except (KeyError, TypeError):
-                raise ScraperError("Failed to parse GraphQL response. The active doc_id may be deprecated.")
+            media = data.get('data', {}).get('xdt_shortcode_media')
+            if media is None:
+                raise ScraperError("Media not found. Post may be private or deleted.")
+            return media
 
     def parse_response(self, raw_data: dict) -> dict:
         """Transform raw GraphQL response into a plain dict."""
         typename = raw_data.get("__typename")
 
-        caption_edges = raw_data.get("edge_media_to_caption", {}).get("edges", [])
+        caption_edges = (raw_data.get("edge_media_to_caption") or {}).get("edges", [])
         caption = caption_edges[0]["node"]["text"] if caption_edges else ""
-        author = raw_data.get("owner", {}).get("username", "")
+        author = (raw_data.get("owner") or {}).get("username", "")
 
         primary_media = {
             "media_type": typename,
@@ -114,7 +114,7 @@ class InstagramGraphScraper:
         carousel_children = None
         if typename in ("GraphSidecar", "XDTGraphSidecar"):
             carousel_children = []
-            edges = raw_data.get("edge_sidecar_to_children", {}).get("edges", [])
+            edges = (raw_data.get("edge_sidecar_to_children") or {}).get("edges", [])
             for edge in edges:
                 node = edge["node"]
                 carousel_children.append({

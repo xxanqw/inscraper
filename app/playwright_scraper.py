@@ -140,9 +140,9 @@ class InstagramPlaywrightScraper:
         """Map a GraphQL node to a plain dict."""
         typename = node.get("__typename", "GraphImage")
 
-        caption_edges = node.get("edge_media_to_caption", {}).get("edges", [])
+        caption_edges = (node.get("edge_media_to_caption") or {}).get("edges", [])
         caption = caption_edges[0]["node"]["text"] if caption_edges else ""
-        author = node.get("owner", {}).get("username", "")
+        author = (node.get("owner") or {}).get("username", "")
 
         primary_media = {
             "media_type": typename,
@@ -153,7 +153,7 @@ class InstagramPlaywrightScraper:
         carousel_children = None
         if typename in ("GraphSidecar", "XDTGraphSidecar"):
             carousel_children = []
-            edges = node.get("edge_sidecar_to_children", {}).get("edges", [])
+            edges = (node.get("edge_sidecar_to_children") or {}).get("edges", [])
             for edge in edges:
                 child = edge["node"]
                 carousel_children.append({
