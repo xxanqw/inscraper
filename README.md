@@ -1,4 +1,4 @@
-# InstaCaper
+# InScraper
 
 Instagram media metadata extractor with VPN rotation and media proxying. Built with FastAPI, `curl-cffi`, Playwright, and Gluetun.
 
