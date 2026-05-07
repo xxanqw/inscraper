@@ -1,21 +1,21 @@
-# InScraper
+# InstaCaper
 
-Instagram media metadata extractor with VPN rotation and media proxying. Built with FastAPI, `curl-cffi`, Playwright, and Gluetun.
+Instagram media downloader with VPN rotation. Built with FastAPI, `curl-cffi`, Playwright, and Gluetun.
 
 ## Features
 
+- **Auto-Download** — Every scrape request downloads media (images/videos) through the VPN tunnel and stores them locally.
 - **GraphQL Scraper** — Directly queries Instagram's internal API with JA3/TLS impersonation via `curl-cffi`.
 - **Playwright Fallback** — DOM-based extraction when GraphQL is blocked or rate-limited.
 - **VPN Rotation** — Automatically rotates NordVPN IPs via Gluetun on 403/429 responses.
-- **Media Proxy** — Optional proxy endpoint to stream media through the VPN tunnel instead of exposing your real IP to Instagram's CDN.
-- **On-Disk Cache** — Persistent SQLite cache for scraped metadata. TTL and 10GB size limit with automatic eviction.
+- **On-Disk Storage** — Persistent filesystem storage with automatic 10GB size limit and LRU eviction.
 - **Zero-Trust Networking** — Scraper container runs inside Gluetun's network namespace; all outbound traffic is tunneled.
 
 ## API
 
 ### `POST /scrape`
 
-Extract metadata via the GraphQL scraper.
+Scrape metadata and download media via the GraphQL scraper.
 
 ```bash
 curl -X POST http://localhost:8080/scrape \
@@ -23,12 +23,18 @@ curl -X POST http://localhost:8080/scrape \
   -d '{"url": "https://www.instagram.com/reel/DX9no32y8K1/"}'
 ```
 
-Add `"proxy": true` to rewrite media URLs through `/proxy`:
+**Response:**
 
-```bash
-curl -X POST http://localhost:8080/scrape \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://www.instagram.com/reel/DX9no32y8K1/", "proxy": true}'
+```json
+{
+  "shortcode": "DX9no32y8K1",
+  "caption": "...",
+  "author": "username",
+  "media_type": "XDTGraphVideo",
+  "thumbnail_url": "/media/DX9no32y8K1/thumbnail.jpg",
+  "video_url": "/media/DX9no32y8K1/video.mp4",
+  "carousel": null
+}
 ```
 
 ### `POST /scrape/playwright`
@@ -41,12 +47,12 @@ curl -X POST http://localhost:8080/scrape/playwright \
   -d '{"url": "https://www.instagram.com/p/C6_abcdefg/"}'
 ```
 
-### `GET /proxy?url=<cdn_url>`
+### `GET /media/{shortcode}/{filename}`
 
-Stream media from Instagram's CDN through the VPN tunnel.
+Serve locally stored media files.
 
 ```bash
-curl -o video.mp4 "http://localhost:8080/proxy?url=https%3A%2F%2Fscontent-..."
+curl -o video.mp4 "http://localhost:8080/media/DX9no32y8K1/video.mp4"
 ```
 
 ### `GET /health`
@@ -159,9 +165,8 @@ docker build -t instcaper .
 | `NORDVPN_USER` | NordVPN service username | — |
 | `NORDVPN_PASSWORD` | NordVPN service password | — |
 | `GLUETUN_API_KEY` | API key for Gluetun control server | `secret-key` |
-| `CACHE_PATH` | SQLite cache file path | `./cache/scraper.db` |
+| `CACHE_PATH` | Cache directory path | `./cache` |
 | `CACHE_MAX_SIZE_GB` | Max cache size before eviction | `10.0` |
-| `CACHE_TTL_SECONDS` | Cache entry lifetime | `3600` |
 
 ## Testing
 

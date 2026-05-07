@@ -5,7 +5,6 @@ import re
 from typing import Optional, Dict, Any
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
-from .models import ScrapeResponse, ExtractedMedia, MediaDimension
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +19,7 @@ class InstagramPlaywrightScraper:
             "likes": "section span:has-text('likes')"
         }
 
-    async def scrape(self, url: str) -> Optional[ScrapeResponse]:
+    async def scrape(self, url: str) -> Optional[Dict]:
         """Scrape using Playwright with stealth and network interception."""
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
@@ -137,28 +136,19 @@ class InstagramPlaywrightScraper:
                     return res
         return None
 
-    def _parse_graphql_node(self, node: Dict) -> ScrapeResponse:
-        """Map a GraphQL node to the ScrapeResponse model."""
+    def _parse_graphql_node(self, node: Dict) -> Dict:
+        """Map a GraphQL node to a plain dict."""
         typename = node.get("__typename", "GraphImage")
 
         caption_edges = node.get("edge_media_to_caption", {}).get("edges", [])
         caption = caption_edges[0]["node"]["text"] if caption_edges else ""
+        author = node.get("owner", {}).get("username", "")
 
-        engagement = {
-            "likes": node.get("edge_media_preview_like", {}).get("count", 0),
-            "comments": node.get("edge_media_to_parent_comment", {}).get("count", 0),
-            "video_views": node.get("video_view_count", 0)
+        primary_media = {
+            "media_type": typename,
+            "display_url": node.get("display_url", ""),
+            "video_url": node.get("video_url") if "video" in typename.lower() else None,
         }
-
-        primary_media = ExtractedMedia(
-            media_type=typename,
-            display_url=node.get("display_url", ""),
-            video_url=node.get("video_url") if "video" in typename.lower() else None,
-            dimensions=MediaDimension(
-                height=node.get("dimensions", {}).get("height", 0),
-                width=node.get("dimensions", {}).get("width", 0)
-            )
-        )
 
         carousel_children = None
         if typename in ("GraphSidecar", "XDTGraphSidecar"):
@@ -166,20 +156,16 @@ class InstagramPlaywrightScraper:
             edges = node.get("edge_sidecar_to_children", {}).get("edges", [])
             for edge in edges:
                 child = edge["node"]
-                carousel_children.append(ExtractedMedia(
-                    media_type=child.get("__typename", "GraphImage"),
-                    display_url=child.get("display_url", ""),
-                    video_url=child.get("video_url") if child.get("is_video") else None,
-                    dimensions=MediaDimension(
-                        height=child.get("dimensions", {}).get("height", 0),
-                        width=child.get("dimensions", {}).get("width", 0)
-                    )
-                ))
+                carousel_children.append({
+                    "media_type": child.get("__typename", "GraphImage"),
+                    "display_url": child.get("display_url", ""),
+                    "video_url": child.get("video_url") if child.get("is_video") else None,
+                })
 
-        return ScrapeResponse(
-            shortcode=node.get("shortcode", ""),
-            caption=caption,
-            primary_media=primary_media,
-            carousel_children=carousel_children,
-            engagement=engagement
-        )
+        return {
+            "shortcode": node.get("shortcode", ""),
+            "caption": caption,
+            "author": author,
+            "primary_media": primary_media,
+            "carousel_children": carousel_children,
+        }

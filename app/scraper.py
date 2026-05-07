@@ -4,7 +4,6 @@ import urllib.parse
 import json
 import logging
 import asyncio
-from .models import ScrapeResponse, ExtractedMedia, MediaDimension
 from .vpn_controller import GluetunController
 
 logger = logging.getLogger(__name__)
@@ -77,7 +76,6 @@ class InstagramGraphScraper:
                 "variables": variables
             }
 
-            # Instagram requires form-encoded payloads, not JSON.
             encoded_payload = urllib.parse.urlencode(payload)
             headers = self.base_headers.copy()
             headers["Content-Type"] = "application/x-www-form-urlencoded"
@@ -99,28 +97,19 @@ class InstagramGraphScraper:
             except (KeyError, TypeError):
                 raise ScraperError("Failed to parse GraphQL response. The active doc_id may be deprecated.")
 
-    def parse_response(self, raw_data: dict) -> ScrapeResponse:
-        """Transform raw GraphQL response into the Pydantic schema."""
+    def parse_response(self, raw_data: dict) -> dict:
+        """Transform raw GraphQL response into a plain dict."""
         typename = raw_data.get("__typename")
 
         caption_edges = raw_data.get("edge_media_to_caption", {}).get("edges", [])
         caption = caption_edges[0]["node"]["text"] if caption_edges else ""
+        author = raw_data.get("owner", {}).get("username", "")
 
-        engagement = {
-            "likes": raw_data.get("edge_media_preview_like", {}).get("count", 0),
-            "comments": raw_data.get("edge_media_to_parent_comment", {}).get("count", 0),
-            "video_views": raw_data.get("video_view_count", 0)
+        primary_media = {
+            "media_type": typename,
+            "display_url": raw_data.get("display_url"),
+            "video_url": raw_data.get("video_url") if raw_data.get("is_video") else None,
         }
-
-        primary_media = ExtractedMedia(
-            media_type=typename,
-            display_url=raw_data.get("display_url"),
-            video_url=raw_data.get("video_url") if raw_data.get("is_video") else None,
-            dimensions=MediaDimension(
-                height=raw_data.get("dimensions", {}).get("height", 0),
-                width=raw_data.get("dimensions", {}).get("width", 0)
-            )
-        )
 
         carousel_children = None
         if typename in ("GraphSidecar", "XDTGraphSidecar"):
@@ -128,21 +117,16 @@ class InstagramGraphScraper:
             edges = raw_data.get("edge_sidecar_to_children", {}).get("edges", [])
             for edge in edges:
                 node = edge["node"]
-                child_media = ExtractedMedia(
-                    media_type=node.get("__typename"),
-                    display_url=node.get("display_url"),
-                    video_url=node.get("video_url") if node.get("is_video") else None,
-                    dimensions=MediaDimension(
-                        height=node.get("dimensions", {}).get("height", 0),
-                        width=node.get("dimensions", {}).get("width", 0)
-                    )
-                )
-                carousel_children.append(child_media)
+                carousel_children.append({
+                    "media_type": node.get("__typename"),
+                    "display_url": node.get("display_url"),
+                    "video_url": node.get("video_url") if node.get("is_video") else None,
+                })
 
-        return ScrapeResponse(
-            shortcode=raw_data.get("shortcode"),
-            caption=caption,
-            primary_media=primary_media,
-            carousel_children=carousel_children,
-            engagement=engagement
-        )
+        return {
+            "shortcode": raw_data.get("shortcode"),
+            "caption": caption,
+            "author": author,
+            "primary_media": primary_media,
+            "carousel_children": carousel_children,
+        }
