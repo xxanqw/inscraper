@@ -3,6 +3,12 @@ name: Publish Docker image
 on:
   push:
     branches: [main]
+    paths:
+      - 'app/**'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'pyproject.toml'
+      - 'uv.lock'
     tags: ['v*.*.*']
 
 env:
