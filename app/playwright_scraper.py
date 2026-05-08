@@ -180,16 +180,18 @@ class InstagramPlaywrightScraper:
         items = []
         seen = set()
 
-        # Deduplicate and classify
+        # Prioritize videos — don't add poster images when we have actual video URLs
         for v in videos:
             if v not in seen:
                 seen.add(v)
                 items.append({"url": v, "type": "video", "thumbnail": images[0] if images else v, "has_audio": True})
 
-        for img in images:
-            if img not in seen:
-                seen.add(img)
-                items.append({"url": img, "type": "image", "thumbnail": img})
+        # Only add images if no videos were found (avoids poster frames being treated as separate media)
+        if not items:
+            for img in images:
+                if img not in seen:
+                    seen.add(img)
+                    items.append({"url": img, "type": "image", "thumbnail": img})
 
         shortcode = self._extract_shortcode(url)
 
