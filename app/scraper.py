@@ -4,7 +4,7 @@ import urllib.parse
 import json
 import logging
 import asyncio
-from .vpn_controller import GluetunController
+from .vpn_controller import GluetunController, VpnRotationError
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +22,15 @@ class RateLimitError(ScraperError):
 gluetun = GluetunController()
 
 
-def trigger_rotation(retry_state):
+async def trigger_rotation(retry_state):
     """Trigger VPN IP rotation before each retry."""
     logger.warning(f"Retry attempt {retry_state.attempt_number}. Rotating VPN IP...")
-    asyncio.create_task(gluetun.rotate_ip())
+    try:
+        await gluetun.rotate_ip()
+    except VpnRotationError as e:
+        logger.warning(f"VPN rotation failed: {e}")
+        # Re-raise as RateLimitError so tenacity continues retrying with backoff
+        raise RateLimitError(str(e))
 
 
 class InstagramGraphScraper:

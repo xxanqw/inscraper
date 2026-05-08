@@ -8,10 +8,15 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+class VpnRotationError(Exception):
+    """Raised when the VPN tunnel fails to come up after rotation."""
+    pass
+
+
 class GluetunController:
     """Manage programmatic IP rotation via the Gluetun sidecar API."""
 
-    ROTATION_COOLDOWN = 60  # seconds
+    ROTATION_COOLDOWN = 90  # seconds
 
     def __init__(self, control_url: Optional[str] = None, api_key: Optional[str] = None):
         self.control_url = control_url or os.getenv("GLUETUN_CONTROL_URL", "http://localhost:8000")
@@ -29,8 +34,41 @@ class GluetunController:
             timeout=15.0,
         )
 
+    async def get_vpn_status(self) -> dict:
+        """Fetch current VPN status from Gluetun."""
+        client = self._client()
+        try:
+            resp = await client.get("/v1/vpn/status")
+            resp.raise_for_status()
+            return resp.json()
+        finally:
+            await client.aclose()
+
+    async def wait_for_connection(self, timeout: float = 60.0, interval: float = 2.0) -> dict:
+        """Poll Gluetun until the VPN is connected or timeout expires."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                status = await self.get_vpn_status()
+                state = status.get("state", "").lower()
+                vpn_status = status.get("status", "").lower()
+                if state == "running" and vpn_status == "connected":
+                    logger.info(f"VPN connected (status={status}).")
+                    return status
+                logger.debug(f"VPN not ready yet: state={state}, status={vpn_status}")
+            except httpx.HTTPStatusError as e:
+                logger.debug(f"HTTP error polling VPN status: {e.response.status_code}")
+            except httpx.ConnectError:
+                logger.debug("Gluetun control server not reachable yet.")
+            except httpx.HTTPError as e:
+                logger.debug(f"Error polling VPN status: {e}")
+            await asyncio.sleep(interval)
+        raise VpnRotationError(
+            f"VPN failed to connect within {timeout}s after rotation — possible transient AUTH_FAILED"
+        )
+
     async def rotate_ip(self):
-        """Teardown and rebuild the VPN tunnel to get a new IP."""
+        """Teardown and rebuild the VPN tunnel, verifying it actually comes up."""
         now = time.time()
         elapsed = now - self._last_rotation
         if elapsed < self.ROTATION_COOLDOWN:
@@ -50,7 +88,8 @@ class GluetunController:
             start_resp = await client.put("/v1/vpn/status", json={"status": "running"})
             start_resp.raise_for_status()
 
-            await asyncio.sleep(7.0)
+            # Wait until the tunnel is actually connected instead of blind sleep
+            await self.wait_for_connection(timeout=60.0, interval=2.0)
             logger.info("VPN IP rotation completed.")
         except httpx.HTTPStatusError as e:
             if e.response.status_code in (401, 403):

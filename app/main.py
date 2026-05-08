@@ -8,6 +8,7 @@ from .models import ScrapeRequest, ScrapeResponse, MediaItem
 from .scraper import InstagramGraphScraper, RateLimitError
 from .playwright_scraper import InstagramPlaywrightScraper
 from .storage import MediaStorage
+from .vpn_controller import GluetunController, VpnRotationError
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="InstaCaper API", version="1.0.0")
 scraper = InstagramGraphScraper()
 pw_scraper = InstagramPlaywrightScraper()
+gluetun = GluetunController()
 storage = MediaStorage(
     base_path=os.getenv("CACHE_PATH", "./cache"),
     max_size_gb=float(os.getenv("CACHE_MAX_SIZE_GB", "10.0")),
@@ -112,6 +114,11 @@ async def process_scrape_request(request: ScrapeRequest):
             logger.warning(f"Attempt {attempt} for {shortcode} rate-limited/timed-out: {e}")
             if attempt < 3:
                 await asyncio.sleep(15)
+        except VpnRotationError as e:
+            last_error = e
+            logger.warning(f"Attempt {attempt} for {shortcode} VPN rotation failed: {e}")
+            if attempt < 3:
+                await asyncio.sleep(30)
         except Exception as e:
             last_error = e
             logger.error(f"Attempt {attempt} for {shortcode} failed: {e}")
@@ -162,4 +169,20 @@ async def serve_media(shortcode: str, filename: str):
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    try:
+        status = await gluetun.get_vpn_status()
+        vpn_status = status.get("status", "").lower()
+        if vpn_status != "connected":
+            raise HTTPException(
+                status_code=503,
+                detail=f"VPN tunnel not connected (status: {vpn_status})."
+            )
+        return {"status": "healthy", "vpn": status}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"Health check failed to query VPN status: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Unable to verify VPN status: {e}"
+        )
