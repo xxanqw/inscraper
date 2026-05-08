@@ -2,6 +2,7 @@ import httpx
 import logging
 import asyncio
 import os
+import time
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -10,9 +11,12 @@ logger = logging.getLogger(__name__)
 class GluetunController:
     """Manage programmatic IP rotation via the Gluetun sidecar API."""
 
+    ROTATION_COOLDOWN = 60  # seconds
+
     def __init__(self, control_url: Optional[str] = None, api_key: Optional[str] = None):
         self.control_url = control_url or os.getenv("GLUETUN_CONTROL_URL", "http://localhost:8000")
         self.api_key = api_key or os.getenv("GLUETUN_API_KEY", "secret-key")
+        self._last_rotation = 0.0
 
     def _client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
@@ -27,6 +31,14 @@ class GluetunController:
 
     async def rotate_ip(self):
         """Teardown and rebuild the VPN tunnel to get a new IP."""
+        now = time.time()
+        elapsed = now - self._last_rotation
+        if elapsed < self.ROTATION_COOLDOWN:
+            logger.info(f"VPN rotation on cooldown ({int(elapsed)}s since last). Waiting for tunnel to stabilize...")
+            await asyncio.sleep(5)
+            return
+
+        self._last_rotation = now
         logger.info("Rate limit hit. Rotating VPN IP...")
         client = self._client()
         try:

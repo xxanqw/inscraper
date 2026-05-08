@@ -80,11 +80,17 @@ class InstagramGraphScraper:
             headers = self.base_headers.copy()
             headers["Content-Type"] = "application/x-www-form-urlencoded"
 
-            response = await session.post(
-                "https://www.instagram.com/graphql/query/",
-                headers=headers,
-                data=encoded_payload
-            )
+            try:
+                response = await session.post(
+                    "https://www.instagram.com/graphql/query/",
+                    headers=headers,
+                    data=encoded_payload
+                )
+            except Exception as e:
+                error_msg = str(e).lower()
+                if any(x in error_msg for x in ("timeout", "timed out", "connection", "curl: (28)")):
+                    raise RateLimitError(f"Network timeout, will retry: {e}")
+                raise
 
             if response.status_code in [401, 403, 429]:
                 raise RateLimitError(f"HTTP {response.status_code}: IP restriction detected.")
