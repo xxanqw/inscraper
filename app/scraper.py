@@ -44,9 +44,19 @@ class InstagramGraphScraper:
             "Referer": "https://www.instagram.com/",
         }
 
+    def _is_network_timeout(self, e: Exception) -> bool:
+        """Check if an exception is a network timeout that should trigger retry."""
+        error_msg = str(e).lower()
+        return any(x in error_msg for x in ("timeout", "timed out", "connection", "curl: (28)"))
+
     async def _bootstrap_session(self, session: AsyncSession):
         """Harvest CSRF token and tracking cookies from Instagram's homepage."""
-        response = await session.get("https://www.instagram.com/")
+        try:
+            response = await session.get("https://www.instagram.com/", timeout=15)
+        except Exception as e:
+            if self._is_network_timeout(e):
+                raise RateLimitError(f"Network timeout during bootstrap: {e}")
+            raise
         response.raise_for_status()
         csrf_token = session.cookies.get("csrftoken")
         if csrf_token:
@@ -84,11 +94,11 @@ class InstagramGraphScraper:
                 response = await session.post(
                     "https://www.instagram.com/graphql/query/",
                     headers=headers,
-                    data=encoded_payload
+                    data=encoded_payload,
+                    timeout=15
                 )
             except Exception as e:
-                error_msg = str(e).lower()
-                if any(x in error_msg for x in ("timeout", "timed out", "connection", "curl: (28)")):
+                if self._is_network_timeout(e):
                     raise RateLimitError(f"Network timeout, will retry: {e}")
                 raise
 

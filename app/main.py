@@ -98,16 +98,32 @@ async def process_scrape_request(request: ScrapeRequest):
         return ScrapeResponse(**metadata)
 
     logger.info(f"Scraping shortcode: {shortcode}")
-    try:
-        raw_graph_data = await scraper.extract_media(shortcode)
-        raw = scraper.parse_response(raw_graph_data)
-        return await _download_and_build_response(shortcode, raw)
-    except RateLimitError as e:
-        logger.error(f"Rate limit exhausted: {str(e)}")
+    last_error = None
+
+    # Endpoint-level retry: if VPN is restarting, wait and try again
+    # so the bot/user never has to resend the link.
+    for attempt in range(1, 4):
+        try:
+            raw_graph_data = await scraper.extract_media(shortcode)
+            raw = scraper.parse_response(raw_graph_data)
+            return await _download_and_build_response(shortcode, raw)
+        except RateLimitError as e:
+            last_error = e
+            logger.warning(f"Attempt {attempt} for {shortcode} rate-limited/timed-out: {e}")
+            if attempt < 3:
+                await asyncio.sleep(15)
+        except Exception as e:
+            last_error = e
+            logger.error(f"Attempt {attempt} for {shortcode} failed: {e}")
+            if attempt < 3:
+                await asyncio.sleep(15)
+
+    # All attempts exhausted
+    if isinstance(last_error, RateLimitError):
+        logger.error(f"Rate limit exhausted for {shortcode}: {last_error}")
         raise HTTPException(status_code=503, detail="Service Unavailable: Proxies exhausted or rate limited.")
-    except Exception as e:
-        logger.error(f"Internal Processing Error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Internal Processing Error: {str(e)}")
+    logger.error(f"Internal Processing Error for {shortcode}: {last_error}")
+    raise HTTPException(status_code=500, detail=f"Internal Processing Error: {last_error}")
 
 
 @app.post("/scrape/playwright", response_model=ScrapeResponse)
