@@ -95,21 +95,23 @@ class GluetunController:
             await asyncio.sleep(5)
             return
 
-        self._last_rotation = now
         logger.info("Rate limit hit. Rotating VPN IP...")
         client = self._client()
         try:
             stop_resp = await client.put("/v1/vpn/status", json={"status": "stopped"})
             stop_resp.raise_for_status()
 
-            # Wait for graceful disconnection
-            await asyncio.sleep(3.0)
+            # Wait for graceful disconnection to clear active sessions on NordVPN's end.
+            # If we reconnect too fast, NordVPN may return AUTH_FAILED due to connection limits.
+            await asyncio.sleep(8.0)
 
             start_resp = await client.put("/v1/vpn/status", json={"status": "running"})
             start_resp.raise_for_status()
 
             # Wait until the tunnel is actually connected instead of blind sleep
             await self.wait_for_connection(timeout=60.0, interval=2.0)
+
+            self._last_rotation = time.time()
             logger.info("VPN IP rotation completed.")
         except httpx.HTTPStatusError as e:
             if e.response.status_code in (401, 403):
