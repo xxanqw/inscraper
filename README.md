@@ -99,7 +99,7 @@ services:
     stop_grace_period: 7s
 
   scraper:
-    image: ghcr.io/xxanqw/inscraper:main
+    image: ghcr.io/xxanqw/inscraper:latest
     container_name: scraper
     network_mode: "service:gluetun"
     volumes:
@@ -148,7 +148,7 @@ docker run -d \
   -e GLUETUN_CONTROL_URL=http://localhost:8000 \
   -e GLUETUN_API_KEY="${GLUETUN_API_KEY:-secret-key}" \
   --restart always \
-  ghcr.io/xxanqw/inscraper:main
+  ghcr.io/xxanqw/inscraper:latest
 ```
 
 ### Build locally
@@ -157,6 +157,22 @@ docker run -d \
 git clone <repo-url>
 cd instcaper
 docker build -t instcaper .
+```
+
+## Docker Image Tags
+
+Images are automatically built and published to GHCR on every push to `main` and on version tags.
+
+| Tag | Description |
+|-----|-------------|
+| `main` | Edge version; mirrors the latest code on the `main` branch. |
+| `latest` | The most recent stable release (mirrors the `main` branch edge version by default). |
+| `vX.Y.Z` | Specific semantic version (e.g., `v1.0.0`). |
+
+To use the latest version in production, we recommend using the `latest` tag:
+
+```yaml
+    image: ghcr.io/xxanqw/inscraper:latest
 ```
 
 ## Environment Variables
