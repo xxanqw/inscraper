@@ -1,6 +1,7 @@
 # InScraper
 
-Instagram media downloader with VPN rotation. Built with FastAPI, `curl-cffi`, Playwright, and Gluetun.
+Instagram media downloader with VPN rotation. Built with FastAPI, `curl-cffi`, Playwright, and Gluetun.  
+Used in [Pinchana](https://s.co.ua/pinchana) (Telegram bot)
 
 ## Features
 
