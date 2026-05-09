@@ -1,103 +1,78 @@
-# InScraper
+# 📥 InScraper
 
-Instagram media downloader with VPN rotation. Built with FastAPI, `curl-cffi`, Playwright, and Gluetun.  
-Used in [Pinchana](https://s.co.ua/pinchana) (Telegram bot)
+**InScraper** is a high-performance Instagram media downloader with automated **VPN rotation**. It provides a FastAPI-based REST service that scrapes post metadata and downloads media (images/videos) through a secure VPN tunnel, serving them from a local cache.
 
-## Features
+Built for reliability and used in production by [Pinchana](https://s.co.ua/pinchana) (Telegram bot).
 
-- **Auto-Download** — Every scrape request downloads media (images/videos) through the VPN tunnel and stores them locally.
-- **GraphQL Scraper** — Directly queries Instagram's internal API with JA3/TLS impersonation via `curl-cffi`.
-- **Playwright Fallback** — DOM-based extraction when GraphQL is blocked or rate-limited.
-- **VPN Rotation** — Automatically rotates NordVPN IPs via Gluetun on 403/429 responses.
-- **On-Disk Storage** — Persistent filesystem storage with automatic 10GB size limit and LRU eviction.
-- **Zero-Trust Networking** — Scraper container runs inside Gluetun's network namespace; all outbound traffic is tunneled.
+---
 
-## API
+## ✨ Key Features
 
-### `POST /scrape`
+- **🚀 Dual Scraping Strategy**
+  - **GraphQL Scraper (Primary):** High-speed direct queries to Instagram's internal API using `curl-cffi` with JA3/TLS fingerprint impersonation.
+  - **Playwright Fallback:** Headless Chromium extraction used when GraphQL is blocked. Supports intercepted JSON, DOM parsing, and Meta tags.
+- **🔄 Smart VPN Rotation**
+  - Automatically rotates NordVPN IPs via **Gluetun** when 403 or 429 (Rate Limit) responses are detected.
+  - Zero-Trust Networking: The scraper has no direct internet access; all traffic *must* pass through the VPN tunnel.
+- **💾 Intelligent Storage**
+  - Persistent on-disk cache with automatic **LRU (Least Recently Used) eviction**.
+  - Default 10GB limit (configurable) to prevent disk exhaustion.
+- **🐳 Production Ready**
+  - Dockerized with a lean Python 3.13 image.
+  - CI/CD pipeline publishing to GitHub Container Registry (GHCR).
 
-Scrape metadata and download media via the GraphQL scraper.
+---
 
-```bash
-curl -X POST http://localhost:8080/scrape \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://www.instagram.com/reel/DX9no32y8K1/"}'
-```
+## 🛠 Tech Stack
 
-**Response:**
+- **Core:** Python 3.13, FastAPI, Uvicorn
+- **Networking:** `curl-cffi` (HTTP/2 + TLS impersonation), `httpx`
+- **Automation:** Playwright + `playwright-stealth`
+- **Logic:** Pydantic v2 (Validation), `tenacity` (Retry & Rotation logic)
+- **Infrastructure:** Gluetun (VPN Orchestration), Docker
 
-```json
-{
-  "shortcode": "DX9no32y8K1",
-  "caption": "...",
-  "author": "username",
-  "media_type": "XDTGraphVideo",
-  "thumbnail_url": "/media/DX9no32y8K1/thumbnail.jpg",
-  "video_url": "/media/DX9no32y8K1/video.mp4",
-  "carousel": null
-}
-```
+---
 
-### `POST /scrape/playwright`
+## 🚦 Getting Started
 
-Fallback scraper using Playwright.
+### 1. Prerequisites
+- Docker & Docker Compose
+- NordVPN account (or any provider supported by Gluetun)
 
-```bash
-curl -X POST http://localhost:8080/scrape/playwright \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://www.instagram.com/p/C6_abcdefg/"}'
-```
-
-### `GET /media/{shortcode}/{filename}`
-
-Serve locally stored media files.
-
-```bash
-curl -o video.mp4 "http://localhost:8080/media/DX9no32y8K1/video.mp4"
-```
-
-### `GET /health`
-
-Health check.
-
-## Setup
-
-Create `.env` from `.env.example` and fill in your NordVPN service credentials.
-
+### 2. Configure Environment
+Create a `.env` file in the root directory:
 ```bash
 cp .env.example .env
 ```
+Fill in your credentials:
+```env
+NORDVPN_USER=your_service_username
+NORDVPN_PASSWORD=your_service_password
+GLUETUN_API_KEY=your_secret_key
+```
 
-## Launch
-
-### Docker Compose (recommended)
-
-Save as `docker-compose.yml`:
+### 3. Launch with Docker Compose
+The recommended way to run InScraper is via Docker Compose, which sets up both the VPN sidecar and the scraper.
 
 ```yaml
 services:
   gluetun:
     image: qmcgaw/gluetun:latest
     container_name: gluetun
-    cap_add:
-      - NET_ADMIN
-    devices:
-      - /dev/net/tun:/dev/net/tun
+    cap_add: [NET_ADMIN]
+    devices: [/dev/net/tun:/dev/net/tun]
     environment:
       - VPN_SERVICE_PROVIDER=nordvpn
       - VPN_TYPE=openvpn
       - OPENVPN_USER=${NORDVPN_USER}
       - OPENVPN_PASSWORD=${NORDVPN_PASSWORD}
-      - OPENVPN_PROTO=tcp
       - SERVER_COUNTRIES=Ukraine,Poland,Germany
-      - FIREWALL=on
       - HTTP_CONTROL_SERVER_ADDRESS=:8000
       - HTTP_CONTROL_SERVER_AUTH_DEFAULT_ROLE={"auth":"apikey","apikey":"${GLUETUN_API_KEY:-secret-key}"}
     ports:
-      - "8000:8000/tcp"
-      - "8080:8080/tcp"
+      - "8000:8000/tcp" # Gluetun API
+      - "8080:8080/tcp" # Scraper API
     restart: unless-stopped
-    stop_grace_period: 7s
 
   scraper:
     image: ghcr.io/xxanqw/inscraper:latest
@@ -105,106 +80,96 @@ services:
     network_mode: "service:gluetun"
     volumes:
       - ./cache:/app/cache
-    depends_on:
-      gluetun:
-        condition: service_started
     environment:
       - GLUETUN_CONTROL_URL=http://localhost:8000
       - GLUETUN_API_KEY=${GLUETUN_API_KEY:-secret-key}
+    depends_on:
+      gluetun:
+        condition: service_started
     restart: always
 ```
 
-Then run:
-
+Run the stack:
 ```bash
 docker compose up -d
 ```
 
-### Direct Docker
+---
 
+## 📡 API Reference
+
+### `POST /scrape`
+Primary endpoint. Attempts GraphQL scraping first, downloads media, and returns metadata.
+
+**Request:**
 ```bash
-# Gluetun
-docker run -d \
-  --name gluetun \
-  --cap-add NET_ADMIN \
-  --device /dev/net/tun:/dev/net/tun \
-  -e VPN_SERVICE_PROVIDER=nordvpn \
-  -e VPN_TYPE=openvpn \
-  -e OPENVPN_USER="$NORDVPN_USER" \
-  -e OPENVPN_PASSWORD="$NORDVPN_PASSWORD" \
-  -e OPENVPN_PROTO=tcp \
-  -e SERVER_COUNTRIES=Ukraine,Poland,Germany \
-  -e FIREWALL=on \
-  -e HTTP_CONTROL_SERVER_ADDRESS=:8000 \
-  -p 8000:8000/tcp \
-  -p 8080:8080/tcp \
-  --restart unless-stopped \
-  qmcgaw/gluetun:latest
-
-# Scraper (pull from GHCR)
-docker run -d \
-  --name scraper \
-  --network container:gluetun \
-  -v "$(pwd)/cache:/app/cache" \
-  -e GLUETUN_CONTROL_URL=http://localhost:8000 \
-  -e GLUETUN_API_KEY="${GLUETUN_API_KEY:-secret-key}" \
-  --restart always \
-  ghcr.io/xxanqw/inscraper:latest
+curl -X POST http://localhost:8080/scrape \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.instagram.com/p/C6_abcdefg/"}'
 ```
 
-### Build locally
-
-```bash
-git clone <repo-url>
-cd instcaper
-docker build -t instcaper .
+**Response Sample:**
+```json
+{
+  "shortcode": "C6_abcdefg",
+  "author": "username",
+  "media_type": "XDTGraphImage",
+  "thumbnail_url": "/media/C6_abcdefg/thumbnail.jpg",
+  "carousel": null
+}
 ```
 
-## Docker Image Tags
+### `POST /scrape/playwright`
+Force use of the Playwright fallback scraper.
 
-Images are automatically built and published to GHCR on every push to `main` and on version tags.
+### `GET /media/{shortcode}/{filename}`
+Serves cached media files (images, videos, thumbnails).
 
-| Tag | Description |
-|-----|-------------|
-| `main` | Edge version; mirrors the latest code on the `main` branch. |
-| `latest` | The most recent stable release (mirrors the `main` branch edge version by default). |
-| `vX.Y.Z` | Specific semantic version (e.g., `v1.0.0`). |
+### `GET /health`
+Returns VPN connection status and scraper health.
 
-To use the latest version in production, we recommend using the `latest` tag:
+---
 
-```yaml
-    image: ghcr.io/xxanqw/inscraper:latest
-```
-
-## Environment Variables
+## ⚙️ Configuration
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `NORDVPN_USER` | NordVPN service username | — |
 | `NORDVPN_PASSWORD` | NordVPN service password | — |
 | `GLUETUN_API_KEY` | API key for Gluetun control server | `secret-key` |
-| `CACHE_PATH` | Cache directory path | `./cache` |
-| `CACHE_MAX_SIZE_GB` | Max cache size before eviction | `10.0` |
+| `CACHE_PATH` | Path to store media | `./cache` |
+| `CACHE_MAX_SIZE_GB` | Max cache size before LRU eviction | `10.0` |
 
-## Testing
+---
 
+## 🧪 Testing
+
+Run integration tests (requires `uv`):
 ```bash
 uv run pytest tests/test_scrapers.py -s
 ```
+*Note: Tests may skip if your local IP is rate-limited and you aren't running through the VPN tunnel.*
 
-Tests may skip if your local IP is rate-limited. For full fidelity, run inside the Docker Compose stack.
+---
 
-## Troubleshooting
+## 🛠 Troubleshooting
 
-### `AUTH_ERROR` on Container Restart
-Gluetun unsets sensitive environment variables (like VPN credentials) from memory immediately after startup for security.
+### `AUTH_ERROR` on Restart
+Gluetun clears credentials from memory after startup. **Do not use `docker restart gluetun`**. 
 
-**Do not use `docker restart gluetun`.** This will cause an `AUTH_ERROR` because the credentials are no longer in the environment.
-
-**The Correct Way to Restart:**
-To force Gluetun to re-read credentials, you must recreate the container:
+Instead, recreate the container to re-inject environment variables:
 ```bash
 docker compose up -d --force-recreate gluetun
 ```
 
-*Note: Programmatic IP rotation via the API (implemented in `app/vpn_controller.py`) avoids this issue because it restarts the VPN tunnel without restarting the container.*
+*Note: Automatic IP rotation (handled by the app) does NOT require a container restart and is safe from this issue.*
+
+---
+
+## 📦 Deployment & Images
+
+Images are hosted on **GitHub Container Registry (GHCR)**.
+
+- `ghcr.io/xxanqw/inscraper:latest` — Stable release.
+- `ghcr.io/xxanqw/inscraper:main` — Bleeding edge (latest commit).
+- `ghcr.io/xxanqw/inscraper:vX.Y.Z` — Specific versions.
