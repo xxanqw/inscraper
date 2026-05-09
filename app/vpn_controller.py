@@ -22,6 +22,7 @@ class GluetunController:
         self.control_url = control_url or os.getenv("GLUETUN_CONTROL_URL", "http://localhost:8000")
         self.api_key = api_key or os.getenv("GLUETUN_API_KEY", "secret-key")
         self._last_rotation = 0.0
+        self._lock = asyncio.Lock()
 
     def _client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
@@ -88,42 +89,43 @@ class GluetunController:
 
     async def rotate_ip(self):
         """Teardown and rebuild the VPN tunnel, verifying it actually comes up."""
-        now = time.time()
-        elapsed = now - self._last_rotation
-        if elapsed < self.ROTATION_COOLDOWN:
-            logger.info(f"VPN rotation on cooldown ({int(elapsed)}s since last). Waiting for tunnel to stabilize...")
-            await asyncio.sleep(5)
-            return
+        async with self._lock:
+            now = time.time()
+            elapsed = now - self._last_rotation
+            if elapsed < self.ROTATION_COOLDOWN:
+                logger.info(f"VPN rotation on cooldown ({int(elapsed)}s since last). Waiting for tunnel to stabilize...")
+                await asyncio.sleep(5)
+                return
 
-        logger.info("Rate limit hit. Rotating VPN IP...")
-        client = self._client()
-        try:
-            stop_resp = await client.put("/v1/vpn/status", json={"status": "stopped"})
-            stop_resp.raise_for_status()
+            logger.info("Rate limit hit. Rotating VPN IP...")
+            client = self._client()
+            try:
+                stop_resp = await client.put("/v1/vpn/status", json={"status": "stopped"})
+                stop_resp.raise_for_status()
 
-            # Wait for graceful disconnection to clear active sessions on NordVPN's end.
-            # If we reconnect too fast, NordVPN may return AUTH_FAILED due to connection limits.
-            await asyncio.sleep(8.0)
+                # Wait for graceful disconnection to clear active sessions on NordVPN's end.
+                # If we reconnect too fast, NordVPN may return AUTH_FAILED due to connection limits.
+                await asyncio.sleep(8.0)
 
-            start_resp = await client.put("/v1/vpn/status", json={"status": "running"})
-            start_resp.raise_for_status()
+                start_resp = await client.put("/v1/vpn/status", json={"status": "running"})
+                start_resp.raise_for_status()
 
-            # Wait until the tunnel is actually connected instead of blind sleep
-            await self.wait_for_connection(timeout=60.0, interval=2.0)
+                # Wait until the tunnel is actually connected instead of blind sleep
+                await self.wait_for_connection(timeout=60.0, interval=2.0)
 
-            self._last_rotation = time.time()
-            logger.info("VPN IP rotation completed.")
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code in (401, 403):
-                logger.error(f"Gluetun auth failed ({e.response.status_code}). Check GLUETUN_API_KEY.")
-            else:
-                logger.error(f"Gluetun control API error: {e.response.status_code}")
-            raise
-        except httpx.ConnectError:
-            logger.error("Cannot connect to Gluetun control server. Is Gluetun running?")
-            raise
-        except httpx.HTTPError as e:
-            logger.error(f"Failed to communicate with Gluetun control server: {e}")
-            raise
-        finally:
-            await client.aclose()
+                self._last_rotation = time.time()
+                logger.info("VPN IP rotation completed.")
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in (401, 403):
+                    logger.error(f"Gluetun auth failed ({e.response.status_code}). Check GLUETUN_API_KEY.")
+                else:
+                    logger.error(f"Gluetun control API error: {e.response.status_code}")
+                raise
+            except httpx.ConnectError:
+                logger.error("Cannot connect to Gluetun control server. Is Gluetun running?")
+                raise
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to communicate with Gluetun control server: {e}")
+                raise
+            finally:
+                await client.aclose()
