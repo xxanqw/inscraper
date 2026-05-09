@@ -96,6 +96,7 @@ services:
       - "8000:8000/tcp"
       - "8080:8080/tcp"
     restart: unless-stopped
+    stop_grace_period: 7s
 
   scraper:
     image: ghcr.io/xxanqw/inscraper:main

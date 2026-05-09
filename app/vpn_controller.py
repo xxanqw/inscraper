@@ -83,6 +83,7 @@ class GluetunController:
             stop_resp = await client.put("/v1/vpn/status", json={"status": "stopped"})
             stop_resp.raise_for_status()
 
+            # Wait for graceful disconnection
             await asyncio.sleep(3.0)
 
             start_resp = await client.put("/v1/vpn/status", json={"status": "running"})
