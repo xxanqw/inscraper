@@ -1,4 +1,4 @@
-# InstaCaper
+# InScraper
 
 Instagram media downloader with VPN rotation. Built with FastAPI, `curl-cffi`, Playwright, and Gluetun.
 
