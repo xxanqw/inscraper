@@ -1,1 +1,1 @@
-/home/xxanqw/Desktop/instcaper/AGENTS.md
+AGENTS.md
