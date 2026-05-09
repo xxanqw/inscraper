@@ -176,3 +176,18 @@ uv run pytest tests/test_scrapers.py -s
 ```
 
 Tests may skip if your local IP is rate-limited. For full fidelity, run inside the Docker Compose stack.
+
+## Troubleshooting
+
+### `AUTH_ERROR` on Container Restart
+Gluetun unsets sensitive environment variables (like VPN credentials) from memory immediately after startup for security.
+
+**Do not use `docker restart gluetun`.** This will cause an `AUTH_ERROR` because the credentials are no longer in the environment.
+
+**The Correct Way to Restart:**
+To force Gluetun to re-read credentials, you must recreate the container:
+```bash
+docker compose up -d --force-recreate gluetun
+```
+
+*Note: Programmatic IP rotation via the API (implemented in `app/vpn_controller.py`) avoids this issue because it restarts the VPN tunnel without restarting the container.*
