@@ -44,18 +44,37 @@ class GluetunController:
         finally:
             await client.aclose()
 
+    async def get_public_ip(self) -> Optional[str]:
+        """Fetch current public IP from Gluetun."""
+        client = self._client()
+        try:
+            resp = await client.get("/v1/publicip/ip")
+            if resp.status_code == 200:
+                return resp.json().get("public_ip")
+            return None
+        except Exception:
+            return None
+        finally:
+            await client.aclose()
+
     async def wait_for_connection(self, timeout: float = 60.0, interval: float = 2.0) -> dict:
         """Poll Gluetun until the VPN is connected or timeout expires."""
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:
                 status = await self.get_vpn_status()
-                state = status.get("state", "").lower()
                 vpn_status = status.get("status", "").lower()
-                if state == "running" and vpn_status == "connected":
-                    logger.info(f"VPN connected (status={status}).")
-                    return status
-                logger.debug(f"VPN not ready yet: state={state}, status={vpn_status}")
+
+                if vpn_status == "running":
+                    # Verification: ensure we can actually get a public IP.
+                    # Gluetun reports 'running' as soon as the process starts,
+                    # but the tunnel might still be performing MTU discovery or IP assignment.
+                    ip = await self.get_public_ip()
+                    if ip:
+                        logger.info(f"VPN connected. Public IP: {ip}")
+                        return status
+
+                logger.debug(f"VPN not ready yet: status={vpn_status}")
             except httpx.HTTPStatusError as e:
                 logger.debug(f"HTTP error polling VPN status: {e.response.status_code}")
             except httpx.ConnectError:
