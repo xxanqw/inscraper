@@ -103,9 +103,8 @@ class GluetunController:
                 stop_resp = await client.put("/v1/vpn/status", json={"status": "stopped"})
                 stop_resp.raise_for_status()
 
-                # Wait for graceful disconnection to clear active sessions on NordVPN's end.
-                # If we reconnect too fast, NordVPN may return AUTH_FAILED due to connection limits.
-                await asyncio.sleep(8.0)
+                # WireGuard is stateless; no need for a long disconnect delay.
+                await asyncio.sleep(1.0)
 
                 start_resp = await client.put("/v1/vpn/status", json={"status": "running"})
                 start_resp.raise_for_status()

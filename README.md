@@ -46,10 +46,36 @@ cp .env.example .env
 ```
 Fill in your credentials:
 ```env
-NORDVPN_USER=your_service_username
-NORDVPN_PASSWORD=your_service_password
+WIREGUARD_PRIVATE_KEY=your_private_key
 GLUETUN_API_KEY=your_secret_key
 ```
+
+#### 🛠 Extracting Private Key (Arch Linux)
+If you are using Arch Linux, you can extract your NordVPN WireGuard (NordLynx) private key using the following steps:
+
+1. **Install Prerequisites**:
+   ```bash
+   # Install NordVPN CLI from AUR (using yay or any AUR helper)
+   yay -S nordvpn-bin
+   # Install WireGuard tools
+   sudo pacman -S wireguard-tools
+   ```
+2. **Login & Connect**:
+   ```bash
+   sudo systemctl start nordvpnd
+   nordvpn login
+   nordvpn set technology nordlynx
+   nordvpn connect
+   ```
+3. **Extract Key**:
+   Run this while the VPN is connected:
+   ```bash
+   sudo wg show nordlynx private-key
+   ```
+4. **Cleanup**:
+   ```bash
+   nordvpn disconnect
+   ```
 
 ### 3. Launch with Docker Compose
 The recommended way to run InScraper is via Docker Compose, which sets up both the VPN sidecar and the scraper.
@@ -63,9 +89,8 @@ services:
     devices: [/dev/net/tun:/dev/net/tun]
     environment:
       - VPN_SERVICE_PROVIDER=nordvpn
-      - VPN_TYPE=openvpn
-      - OPENVPN_USER=${NORDVPN_USER}
-      - OPENVPN_PASSWORD=${NORDVPN_PASSWORD}
+      - VPN_TYPE=wireguard
+      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
       - SERVER_COUNTRIES=Ukraine,Poland,Germany
       - HTTP_CONTROL_SERVER_ADDRESS=:8000
       - HTTP_CONTROL_SERVER_AUTH_DEFAULT_ROLE={"auth":"apikey","apikey":"${GLUETUN_API_KEY:-secret-key}"}
@@ -134,8 +159,7 @@ Returns VPN connection status and scraper health.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `NORDVPN_USER` | NordVPN service username | — |
-| `NORDVPN_PASSWORD` | NordVPN service password | — |
+| `WIREGUARD_PRIVATE_KEY` | NordVPN WireGuard Private Key | — |
 | `GLUETUN_API_KEY` | API key for Gluetun control server | `secret-key` |
 | `CACHE_PATH` | Path to store media | `./cache` |
 | `CACHE_MAX_SIZE_GB` | Max cache size before LRU eviction | `10.0` |
